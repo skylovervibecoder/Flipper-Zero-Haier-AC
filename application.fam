@@ -1,0 +1,11 @@
+App(
+    appid="haier_ac",
+    name="Haier AC",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="haier_ac_app",
+    stack_size=2 * 1024,
+    fap_category="Infrared",
+    fap_version="0.1",
+    fap_description="Telecomando completo IR per Haier AS35RBAHRA-3 (protocollo a 176 bit)",
+    fap_author="Marco",
+)
