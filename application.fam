@@ -8,4 +8,5 @@ App(
     fap_version="0.1",
     fap_description="Telecomando completo IR per Haier AS35RBAHRA-3 (protocollo a 176 bit)",
     fap_author="Marco",
+    fap_icon="haier.png",
 )
