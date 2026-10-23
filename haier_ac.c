@@ -8,6 +8,7 @@
  * Il segnale viene inviato SOLO quando si preme OK.
  *
  * Campi (tutti verificati su catture reali):
+ *   byte 2  : swing orizzontale (6 posizioni): 1=60 2=80 3=00(centro) 4=A0 5=C0 6=E0(auto)
  *   byte 1  : (temp-16)<<4 | posizione alette verticali (0 se spento):
  *             pos1=A, pos2=8, pos3=6, pos4=4, pos5=2, auto=C  (= 2*(6-pos))
  *   byte 3  : 0x02 Health
@@ -18,10 +19,10 @@
  *   byte 8  : 0x80 se Sleep
  *   byte 10 : 0x10 Self clean
  *   byte 12 : codice dell'ULTIMO TASTO premuto sul telecomando:
- *             swing 02, fan 04, health 07, turbo/quiet 08, sleep 0B, self clean 19
- *             (power/mode/temp: 05 nelle catture, ma una cattura in Auto a 26 C da' 00)
+ *             swing 02, swingH 03, fan 04, eco 17, health 07, turbo/quiet 08, sleep 0B, self clean 19
+ *             temp+ 00, temp- 01, power 05, mode 06
  *   byte 14 : 0xB7
- *   byte 15 : 0x40 Self clean
+ *   byte 15 : 0x40 Self clean | Eco: 0x10 | (livello<<2)  (L1=14 L2=18 L3=1C, off=00)
  *   byte 16 : ventola low C0 / med 80 / high 40, auto = 00
  *
  * Regole del telecomando (da te): pos 1 alette solo in Heat; Sleep non in Fan;
@@ -30,7 +31,10 @@
  * in Fan niente ventola Auto; Self clean solo in Cool, Dry e Fan e non si puo'
  * spegnere dal telecomando (qui e' un'azione: OK sulla riga lo invia).
  *
- * Non ancora verificato: tasti Power/Mode/Temp e byte 12, Turbo/Quiet con ventola
+ * Eco (L1-L3) in tutti i modi tranne Fan; SwingH in tutti. iFeel non implementato.
+ * Eco resta attivo anche con Turbo e Sleep (dalle catture).
+ *
+ * Non ancora verificato: Turbo/Quiet con ventola
  * non auto, ventola low/med/high in Cool/Heat/Dry, swing orizzontale, timer.
  */
 
@@ -51,8 +55,13 @@
 #define T_ZERO  565
 
 /* codici byte 12 (ultimo tasto) */
-#define KEY_PWR_MODE_TEMP 0x05
+#define KEY_TEMP_UP       0x00
+#define KEY_TEMP_DOWN     0x01
+#define KEY_POWER         0x05
+#define KEY_MODE          0x06
 #define KEY_SWING         0x02
+#define KEY_SWING_H       0x03
+#define KEY_ECO           0x17
 #define KEY_FAN           0x04
 #define KEY_HEALTH        0x07
 #define KEY_TURBO         0x08
@@ -67,13 +76,17 @@ typedef enum {
     RowTemp,
     RowFan,
     RowSwingV,
+    RowSwingH,
     RowHealth,
     RowSleep,
     RowTurbo,
+    RowEco,
     RowClean,
     RowCount
 } Row;
 
+#define SWH_COUNT  6 /* swingH: indici 0..5 = posizioni 1..6 (1 sx, 3 centro, 5 dx, 6 auto) */
+#define SWH_CENTER 2
 #define SWV_AUTO 6 /* swingV: 1..5 = posizioni, 6 = auto */
 #define TQ_OFF   0
 #define TQ_TURBO 1
@@ -82,10 +95,13 @@ typedef enum {
 static const uint8_t mode_code[ModeCount] = {0x00, 0x20, 0x80, 0x40, 0xC0};
 static const uint8_t fan_code[FanCount] = {0xA0, 0x60, 0x40, 0x20};
 static const uint8_t fan_b16_code[FanCount] = {0x00, 0xC0, 0x80, 0x40};
+static const uint8_t swh_code[SWH_COUNT] = {0x60, 0x80, 0x00, 0xA0, 0xC0, 0xE0};
+static const char* swh_name[SWH_COUNT] = {"1 Sx", "2", "3 Ctr", "4", "5 Dx", "Auto"};
 static const char* mode_name[ModeCount] = {"Auto", "Cool", "Heat", "Dry", "Fan"};
 static const char* fan_name[FanCount] = {"Auto", "Low", "Med", "High"};
 static const char* lbl[RowCount] =
-    {"Power", "Mode", "Temp", "Fan", "SwingV", "Health", "Sleep", "Turbo/Quiet", "Self clean"};
+    {"Power", "Mode", "Temp", "Fan", "SwingV", "SwingH", "Health", "Sleep", "Turbo/Quiet",
+     "Eco", "Self clean"};
 
 typedef struct {
     bool power;
@@ -93,6 +109,8 @@ typedef struct {
     uint8_t temp; /* 16..30 */
     AcFan fan;
     uint8_t swing_v; /* 1..5, SWV_AUTO */
+    uint8_t swing_h; /* 0..5 */
+    uint8_t eco; /* 0 = off, 1..3 = L1..L3 */
     bool health;
     bool sleep;
     uint8_t tq; /* TQ_* */
@@ -112,6 +130,9 @@ static bool sleep_allowed(const AcState* s) {
 static bool tq_allowed(const AcState* s) {
     return s->mode == ModeCool || s->mode == ModeHeat;
 }
+static bool eco_allowed(const AcState* s) {
+    return s->mode != ModeFan;
+}
 static bool clean_allowed(const AcState* s) {
     return s->mode == ModeCool || s->mode == ModeDry || s->mode == ModeFan;
 }
@@ -124,6 +145,7 @@ static void build_frame(const AcState* s, bool clean, uint8_t f[FRAME_BYTES]) {
 
     f[0] = 0xA6;
     f[1] = ((s->temp - 16) << 4) | (s->power ? swc : 0);
+    f[2] = swh_code[s->swing_h];
     f[3] = s->health ? 0x02 : 0x00;
     f[4] = s->power ? 0x40 : 0x00;
     f[5] = fan_code[fan] | (s->sleep ? 0x08 : 0x00);
@@ -136,7 +158,7 @@ static void build_frame(const AcState* s, bool clean, uint8_t f[FRAME_BYTES]) {
     for(int i = 0; i < 13; i++) sum += f[i];
     f[13] = sum;
     f[14] = 0xB7;
-    f[15] = clean ? 0x40 : 0x00;
+    f[15] = (clean ? 0x40 : 0x00) | (s->eco ? (0x10 | (s->eco << 2)) : 0x00);
     f[16] = fan_b16_code[fan];
     sum = 0;
     for(int i = 14; i < 21; i++) sum += f[i];
@@ -177,6 +199,12 @@ static void row_value(const AcState* s, Row r, char* out, size_t len) {
     case RowSwingV:
         if(s->swing_v == SWV_AUTO) snprintf(out, len, "Auto");
         else snprintf(out, len, "%u", s->swing_v);
+        break;
+    case RowSwingH: snprintf(out, len, "%s", swh_name[s->swing_h]); break;
+    case RowEco:
+        if(!eco_allowed(s)) snprintf(out, len, "--");
+        else if(s->eco == 0) snprintf(out, len, "OFF");
+        else snprintf(out, len, "L%u", s->eco);
         break;
     case RowHealth: snprintf(out, len, "%s", s->health ? "ON" : "OFF"); break;
     case RowSleep:
@@ -238,7 +266,7 @@ static void change(AcState* s, int dir) {
     switch(s->row) {
     case RowPower:
         s->power = !s->power;
-        s->last_key = KEY_PWR_MODE_TEMP;
+        s->last_key = KEY_POWER;
         break;
     case RowMode:
         s->mode = (s->mode + ModeCount + dir) % ModeCount;
@@ -246,12 +274,13 @@ static void change(AcState* s, int dir) {
         if(s->mode == ModeFan && s->fan == FanAuto) s->fan = FanLow; /* in Fan niente Auto */
         if(!sleep_allowed(s)) s->sleep = false;
         if(!tq_allowed(s)) s->tq = TQ_OFF;
-        s->last_key = KEY_PWR_MODE_TEMP;
+        if(!eco_allowed(s)) s->eco = 0;
+        s->last_key = KEY_MODE;
         break;
     case RowTemp:
         if(dir > 0 && s->temp < 30) s->temp++;
         if(dir < 0 && s->temp > 16) s->temp--;
-        s->last_key = KEY_PWR_MODE_TEMP;
+        s->last_key = (dir > 0) ? KEY_TEMP_UP : KEY_TEMP_DOWN;
         break;
     case RowFan:
         if(s->tq != TQ_OFF) {
@@ -274,6 +303,15 @@ static void change(AcState* s, int dir) {
         s->last_key = KEY_SWING;
         break;
     }
+    case RowSwingH:
+        s->swing_h = (s->swing_h + SWH_COUNT + dir) % SWH_COUNT;
+        s->last_key = KEY_SWING_H;
+        break;
+    case RowEco:
+        if(!eco_allowed(s)) break;
+        s->eco = (s->eco + 4 + dir) % 4; /* Off -> L1 -> L2 -> L3 -> Off */
+        s->last_key = KEY_ECO;
+        break;
     case RowHealth:
         s->health = !s->health;
         s->last_key = KEY_HEALTH;
@@ -300,8 +338,9 @@ int32_t haier_ac_app(void* p) {
     UNUSED(p);
     App* app = malloc(sizeof(App));
     app->st = (AcState){.power = true, .mode = ModeCool, .temp = 24, .fan = FanAuto,
-                        .swing_v = 2, .health = false, .sleep = false, .tq = TQ_OFF,
-                        .last_key = KEY_PWR_MODE_TEMP, .row = RowPower};
+                        .swing_v = 2, .swing_h = SWH_CENTER, .eco = 0,
+                        .health = false, .sleep = false, .tq = TQ_OFF,
+                        .last_key = KEY_POWER, .row = RowPower};
     app->mutex = furi_mutex_alloc(FuriMutexTypeNormal);
     app->queue = furi_message_queue_alloc(8, sizeof(InputEvent));
 
