@@ -3,10 +3,11 @@ App(
     name="Haier AC",
     apptype=FlipperAppType.EXTERNAL,
     entry_point="haier_ac_app",
-    stack_size=2 * 1024,
+    stack_size=4 * 1024,
     fap_category="Infrared",
-    fap_version="0.1",
-    fap_description="Telecomando completo IR per Haier AS35RBAHRA-3 (protocollo a 176 bit)",
-    fap_author="Marco",
+    fap_author="Marcopiiit",
+    fap_version="2.0",
+    fap_description="Telecomando grafico per climatizzatore Haier AS35RBAHRA-3 (YR-HE2)",
     fap_icon="haier.png",
+
 )
