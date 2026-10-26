@@ -13,7 +13,7 @@ TESTED IN MOMENTUM DEV
 
 ---- REMOTE TYPE
 
-![remote](remotetype.jpg)
+![remote](remote.jpg)
 
 
 A custom infrared remote-control application for the **Haier AS35RBAHRA-3 air conditioner**, designed for Flipper Zero running Momentum firmware.
