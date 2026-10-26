@@ -3,7 +3,15 @@ Flipper Zero dynamic remote for Haier AC.
 
 TESTED IN MOMENTUM DEV
 
+---- VERTICAL LAYOUT
+
 ![vertical](haier.png)
+
+---- HORIZONTAL LAYOUT
+
+![horizontal](horiz.png)
+
+---- REMOTE TYPE
 
 ![remote](remotetype.jpg)
 
