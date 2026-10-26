@@ -3,6 +3,7 @@ Flipper Zero dynamic remote for Haier AC.
 
 TESTED IN MOMENTUM DEV
 
+![vertical](haier.png)
 
 ![remote](remotetype.jpg)
 
